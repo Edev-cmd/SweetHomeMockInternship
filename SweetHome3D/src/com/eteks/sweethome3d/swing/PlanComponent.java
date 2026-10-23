@@ -2006,41 +2006,37 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
   /**
    * Prints this component plan at the scale given in the home print attributes or at a scale 
    * that makes it fill <code>pageFormat</code> imageable size if this attribute is <code>null</code>.
-   * When the home contains levels, each viewable level is printed on its own page(s) in levels order,
-   * and the level selected before printing is selected again once done.
+   * When the home has levels, each viewable level is printed on its own page(s), in levels order.
    */
   public int print(Graphics g, PageFormat pageFormat, int pageIndex) {
     if (this.home.getLevels().isEmpty()) {
       return printSelectedLevel(g, pageFormat, pageIndex);
     }
-    // Print the plan of each viewable level in home levels order. Page indices run through
-    // the pages of the first level, then the pages of the next one, and so on.
+    List<Level> printedLevels = new ArrayList<Level>();
+    for (Level level : this.home.getLevels()) {
+      if (level.isViewable()) {
+        printedLevels.add(level);
+      }
+    }
+    // Printed items don't depend on the selected level, so every level needs the same page count
+    int levelPageCount = getLevelPageCount(g, pageFormat);
+    if (pageIndex >= printedLevels.size() * levelPageCount) {
+      return NO_SUCH_PAGE;
+    }
     Level selectedLevel = this.home.getSelectedLevel();
     try {
-      int levelFirstPageIndex = 0;
-      for (Level level : this.home.getLevels()) {
-        if (level.isViewable()) {
-          // Selecting a level is temporary print state, restored below
-          this.home.setSelectedLevel(level);
-          int levelPageCount = getSelectedLevelPageCount(g, pageFormat);
-          if (pageIndex < levelFirstPageIndex + levelPageCount) {
-            return printSelectedLevel(g, pageFormat, pageIndex - levelFirstPageIndex);
-          }
-          levelFirstPageIndex += levelPageCount;
-        }
-      }
-      return NO_SUCH_PAGE;
+      this.home.setSelectedLevel(printedLevels.get(pageIndex / levelPageCount));
+      return printSelectedLevel(g, pageFormat, pageIndex % levelPageCount);
     } finally {
-      // Restore the selected level even if a page couldn't be rendered
+      // The printed level is selected only temporarily: restore it even if the page can't be rendered
       this.home.setSelectedLevel(selectedLevel);
     }
   }
 
   /**
-   * Returns the count of pages required to print the plan of the selected level,
-   * with the same page layout as {@link #printSelectedLevel(Graphics, PageFormat, int)}.
+   * Returns the count of pages needed to print the plan of one level.
    */
-  private int getSelectedLevelPageCount(Graphics g, PageFormat pageFormat) {
+  private int getLevelPageCount(Graphics g, PageFormat pageFormat) {
     Rectangle2D printedItemBounds = getItemsBounds(g, getPaintedItems());
     if (printedItemBounds == null) {
       return 0;
@@ -2048,23 +2044,21 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
       return 1;
     } else {
       float printScale = this.home.getPrint().getPlanScale().floatValue() * LengthUnit.centimeterToInch(72);
-      double imageableWidth = pageFormat.getImageableWidth();
-      double imageableHeight = pageFormat.getImageableHeight();
-      int pagesPerRow = (int)(printedItemBounds.getWidth() * printScale / imageableWidth);
-      if (printedItemBounds.getWidth() * printScale != imageableWidth) {
-        pagesPerRow++;
-      }
-      int pagesPerColumn = (int)(printedItemBounds.getHeight() * printScale / imageableHeight);
-      if (printedItemBounds.getHeight() * printScale != imageableHeight) {
-        pagesPerColumn++;
-      }
-      return pagesPerRow * pagesPerColumn;
+      return getPageCount(printedItemBounds.getWidth() * printScale, pageFormat.getImageableWidth())
+          * getPageCount(printedItemBounds.getHeight() * printScale, pageFormat.getImageableHeight());
     }
   }
 
   /**
-   * Prints the plan of the selected level at the scale given in the home print attributes or at a scale
-   * that makes it fill <code>pageFormat</code> imageable size if this attribute is <code>null</code>.
+   * Returns the count of pages needed to print the given size along one side of the paper.
+   */
+  private static int getPageCount(double printedSize, double imageableSize) {
+    int pageCount = (int)(printedSize / imageableSize);
+    return printedSize != imageableSize ? pageCount + 1 : pageCount;
+  }
+
+  /**
+   * Prints the plan of the selected level.
    */
   private int printSelectedLevel(Graphics g, PageFormat pageFormat, int pageIndex) {
     List<Selectable> printedItems = getPaintedItems(); 
@@ -2092,14 +2086,8 @@ public class PlanComponent extends JComponent implements PlanView, Scrollable, P
       } else {
         // Apply print scale to paper size expressed in 1/72nds of an inch
         printScale = this.home.getPrint().getPlanScale().floatValue() * LengthUnit.centimeterToInch(72);
-        pagesPerRow = (int)(printedItemBounds.getWidth() * printScale / imageableWidth);
-        if (printedItemBounds.getWidth() * printScale != imageableWidth) {
-          pagesPerRow++;
-        }
-        pagesPerColumn = (int)(printedItemBounds.getHeight() * printScale / imageableHeight);
-        if (printedItemBounds.getHeight() * printScale != imageableHeight) {
-          pagesPerColumn++;
-        }
+        pagesPerRow = getPageCount(printedItemBounds.getWidth() * printScale, imageableWidth);
+        pagesPerColumn = getPageCount(printedItemBounds.getHeight() * printScale, imageableHeight);
         if (pageIndex >= pagesPerRow * pagesPerColumn) {
           return NO_SUCH_PAGE;
         }
